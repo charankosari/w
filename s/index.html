@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cardano dApp Minter</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f4f4f9;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        width: 90%;
+        max-width: 500px;
+      }
+      button {
+        background-color: #0033ad;
+        color: white;
+        border: none;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: 16px;
+        cursor: pointer;
+        margin-top: 20px;
+      }
+      button:hover {
+        background-color: #002275;
+      }
+      button:disabled {
+        background-color: #cccccc;
+      }
+      #status {
+        margin-top: 20px;
+        font-size: 14px;
+        color: #555;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+      img {
+        max-width: 200px;
+        margin-top: 10px;
+        border-radius: 8px;
+      }
+    </style>
+    <script
+      type="module"
+      src="https://cdn.jsdelivr.net/npm/@martifylabs/cardano-wallet-api@0.2.10/init.js"
+    ></script>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Mint an NFT</h1>
+      <button id="connectBtn">Connect Wallet</button>
+
+      <div id="minter" style="display: none">
+        <p><strong>Wallet Connected!</strong></p>
+        <input type="file" id="fileInput" accept="image/*" />
+        <br />
+        <button id="mintBtn">Mint NFT</button>
+      </div>
+
+      <p id="status">Status: Waiting...</p>
+      <div id="preview"></div>
+    </div>
+
+    <script type="module">
+      const connectBtn = document.getElementById("connectBtn");
+      const mintBtn = document.getElementById("mintBtn");
+      const fileInput = document.getElementById("fileInput");
+      const statusEl = document.getElementById("status");
+      const minterDiv = document.getElementById("minter");
+      const previewDiv = document.getElementById("preview");
+
+      const BACKEND_URL = "http://127.0.0.1:5001";
+      let wallet = null;
+      let userAddressHex = null;
+
+      // Connect Wallet
+      connectBtn.addEventListener("click", async () => {
+        try {
+          const connectedWallet = await wallet.enable();
+          if (connectedWallet) {
+            wallet = connectedWallet;
+            const usedAddresses = await wallet.getUsedAddresses();
+            userAddressHex = usedAddresses[0];
+            connectBtn.style.display = "none";
+            minterDiv.style.display = "block";
+            statusEl.textContent = "Wallet connected ✅";
+          }
+        } catch (e) {
+          statusEl.textContent = `Error: ${e.message}`;
+        }
+      });
+
+      // Mint NFT
+      mintBtn.addEventListener("click", async () => {
+        if (!fileInput.files.length) {
+          statusEl.textContent = "Please select an image.";
+          return;
+        }
+        mintBtn.disabled = true;
+        statusEl.textContent = "Uploading to IPFS & building tx...";
+
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("userAddress", userAddressHex);
+
+        try {
+          const response = await fetch(`${BACKEND_URL}/create-unsigned-tx`, {
+            method: "POST",
+            body: formData,
+          });
+          if (!response.ok) throw new Error(await response.text());
+
+          const { txCbor, ipfsHash, assetName } = await response.json();
+
+          statusEl.textContent = "Sign transaction in wallet...";
+          const signedTx = await wallet.signTx(txCbor, true);
+
+          statusEl.textContent = "Submitting to blockchain...";
+          const txHash = await wallet.submitTx(signedTx);
+
+          statusEl.innerHTML = `
+            ✅ NFT Minted!<br>
+            Asset: ${assetName}<br>
+            IPFS: ${ipfsHash}<br>
+            Tx Hash: ${txHash}<br>
+            <a href="https://preview.cardanoscan.io/transaction/${txHash}" target="_blank">View on Cardanoscan</a>
+          `;
+
+          previewDiv.innerHTML = `<img src="https://ipfs.io/ipfs/${ipfsHash}" alt="NFT" />`;
+        } catch (e) {
+          statusEl.textContent = `Error: ${e.message}`;
+        } finally {
+          mintBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
